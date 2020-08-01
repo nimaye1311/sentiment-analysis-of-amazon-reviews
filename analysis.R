@@ -15,6 +15,9 @@ library(viridis)
 library(viridisLite)
 library(party)
 library(randomForest)
+library(corrplot)
+library(ggthemes)
+library(ggrepel)
 
 reviews_data <- reviews_Musical_Instruments_5 
 
@@ -117,11 +120,26 @@ reviews_data_proper$helpful <- as.factor(reviews_data_proper$helpful)
 ggplot(reviews_data_proper, aes(sentiment, `review rating`, col = `length`)) + 
     geom_jitter() +
     geom_smooth(method = "lm", formula = y ~ x) + 
-    scale_color_gradientn(colors = c("yellow", "orange", "red", "maroon", "darkred"))
+    scale_color_gradientn(colors = c("yellow", "orange", "red", 
+                                     "maroon", "darkred")) 
 
-ggplot(reviews_data_proper, aes(sentiment, `length`, col = helpful)) + 
+ggplot(reviews_data_proper, aes(sentiment, `length`, col = helpful, label = 
+                                    sentiment)) + 
     geom_jitter() +
-    geom_smooth(method = "lm", formula = y ~ x) 
+    geom_smooth(method = "lm", formula = y ~ x) +
+    theme_economist() +
+    geom_label(color = "blue", nudge_x = 1) +
+    geom_label_repel()
+
+# Corrplot to check for other correlations
+
+corr_mat <- cor(select(reviews_data_proper, `review rating`, sentiment, length, overall))
+corrplot(corr_mat, order = "original", tl.cex = 0.7, method = "number")
+
+# Turns out, there is no real connection between review rating and sentiment/length
+# The Pearson coefficient is 0.11, which implies almost no correlation
+# Despite there being no correlation, I wanted to explore if the machine
+# could predict the helpfulness of a rating accurately
 
 training_set <- reviews_data_proper[sample(nrow(reviews_data_proper), 0.8 * nrow(reviews_data_proper)),]
 testing_set <- reviews_data_proper[-sample(nrow(reviews_data_proper), 0.8 * nrow(reviews_data_proper)),]
@@ -131,13 +149,15 @@ model.ctree <- ctree(`helpful` ~ overall + sentiment +
 
 testing_set$ctree.predictions <- predict(model.ctree, testing_set)
 
-# All values were reported to be yes by the predict() function
-
 # Confusion matrix
 conf.mat.ctree <- table(testing_set$ctree.predictions, testing_set$helpful, 
                         dnn = c("Predicted", "Actual") )
 
-# Error Rate = 102/693*100 = 14.72%
+conf.df.ctree <- as.data.frame(conf.mat.ctree)
+
+conf.df.ctree.error.count <- conf.df.ctree$Freq[conf.df.ctree$Predicted != conf.df.ctree$Actual]
+conf.ctree.error.rate <- sum(conf.df.ctree.error.count / nrow(testing_set) * 100)
+print(paste(conf.ctree.error.rate, "%", sep = ""))
 
 model.randomForest <- randomForest(`helpful` ~ overall + sentiment + 
                                         length, data = training_set, 
@@ -147,6 +167,19 @@ testing_set$randomForest.predictions <- predict(model.randomForest, testing_set)
 
 conf.mat.forest <- table(testing_set$randomForest.predictions, testing_set$helpful,
                          dnn = c("Predicted", "Actual"))
-plot(model.randomForest)
 
-# Error Rate = 91/693*100 = 13.13% -> No difference with 500 trees 
+conf.df.forest <- as.data.frame(conf.mat.forest)
+
+conf.df.forest.error.count <- conf.df.forest$Freq[conf.df.forest$Predicted != conf.df.forest$Actual]
+conf.forest.error.rate <- sum(conf.df.forest.error.count / nrow(testing_set) * 100)
+print(paste(conf.forest.error.rate, "%", sep = ""))
+
+# GLM Model
+
+model.GLM <- glm(`helpful` ~ overall + sentiment + length, family = binomial(),
+                 data = reviews_data_proper)
+testing_set$GLM.predictions <- predict(model.GLM, testing_set)
+conf.mat.glm <- table(testing_set$GLM.predictions, testing_set$helpful,
+                         dnn = c("Predicted", "Actual"))
+
+
